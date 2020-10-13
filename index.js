@@ -1,7 +1,9 @@
+require('dotenv').config()
 const { response } = require('express')
 const express = require('express')
 const morgan = require('morgan')
 const cors = require('cors')
+const Person = require('./models/person')
 
 const app = express()
 app.use(cors())
@@ -14,59 +16,48 @@ morgan.token('body', function (req, res) { return JSON.stringify(req.body) })
 
 app.use(morgan(function (tokens, req, res) {
     return [
-      tokens.method(req, res),
-      tokens.url(req, res),
-      tokens.status(req, res),
-      tokens.res(req, res, 'content-length'), '-',
-      tokens['response-time'](req, res), 'ms',
-      tokens.body(req,res)
+        tokens.method(req, res),
+        tokens.url(req, res),
+        tokens.status(req, res),
+        tokens.res(req, res, 'content-length'), '-',
+        tokens['response-time'](req, res), 'ms',
+        tokens.body(req, res)
     ].join(' ')
-  }))
+}))
 
+const errorHandler = (error, req, res, next) => {
+    console.log(error.message)
 
-let persons = [
-    {
-        "name": "Arto Hellas",
-        "number": "040-123456",
-        "id": 1
-    },
-    {
-        "name": "Ada Lovelace",
-        "number": "39-44-5323523",
-        "id": 2
-    },
-    {
-        "name": "Dan Abramov",
-        "number": "12-43-234345",
-        "id": 3
-    },
-    {
-        "name": "Mary Poppendieck",
-        "number": "39-23-6423122",
-        "id": 4
-    }
-]
-
-app.get('/api/persons', (req, res) => {
-    res.json(persons)
-})
-
-app.get('/api/persons/:id', (req, res) => {
-    const id = Number(req.params.id)
-    const person = persons.find(p => p.id === id)
-    if (person) {
-        res.json(person)
-    } else {
-        res.status(404).end()
+    if (error.name === 'CastError' && error.kind === 'ObjectId') {
+        return res.status(400).send({ error: 'malformatted id' })
     }
 
-})
-
-generateId = () => {
-    return Math.floor(Math.random() * Math.floor(100000000));
+    next(error)
 }
 
-app.post('/api/persons', (req, res) => {
+app.use(errorHandler)
+
+app.get('/api/persons', (req, res) => {
+    Person.find({}).then(persons => {
+        res.json(persons)
+    })
+})
+
+app.get('/api/persons/:id', (req, res, next) => {
+    Person.findById(req.params.id)
+        .then(person => {
+            if(person){
+                res.json(person)
+            }
+            else{
+                res.status(404).send('malformatted id')
+            }
+            
+        })
+        .catch(error => next(error))
+})
+
+app.post('/api/persons', (req, res, next) => {
     const body = req.body
     if (!body.name) {
         return res.status('400').json({
@@ -78,37 +69,42 @@ app.post('/api/persons', (req, res) => {
             error: 'number missing'
         })
     }
-    if (persons.find(p => p.name === body.name)) {
-        return res.status('400').json({
-            error: 'name must be unique'
-        })
 
-    }
-
-    const person = {
+    const person = new Person({
         name: body.name,
         number: body.number,
-        id: generateId()
-    }
+    })
 
-    persons = persons.concat(person)
-
-    res.json(person)
+    person.save().then(savedPerson => {
+        res.json(savedPerson)
+    })
 })
 
+app.put('/api/persons/:id', (req, res, next) => {
+    const body = req.body
+    const person = {
+        number: body.number
+    }
+    Person.findByIdAndUpdate(req.params.id, person, { new: true })
+        .then(updatedPerson => res.json(updatedPerson))
+        .catch(error => next(error))
+})
 
-app.delete('/api/persons/:id', (req, res) => {
-    const id = Number(req.params.id)
-    persons = persons.filter(p => p.id !== id)
-
-    res.status(204).end()
+app.delete('/api/persons/:id', (req, res, next) => {
+    Person.findByIdAndRemove(req.params.id)
+        .then(result => res.status(204).end())
+        .catch(error => next(error))
 })
 
 app.get('/info', (req, res) => {
-    res.send(`<p>Phonebook has info fro ${persons.length} people</p> <p>${new Date().toString()}</p>`)
+    Person.find({})
+        .then(persons => {
+            res.send(`<p>Phonebook has info fro ${persons.length} people</p> <p>${new Date().toString()}</p>`)
+        })
+   
 })
 
-const PORT = process.env.PORT || 3001
+const PORT = process.env.PORT
 app.listen(PORT, (req, res) => {
     console.log(`Server runing, listen port ${PORT}`)
 })
